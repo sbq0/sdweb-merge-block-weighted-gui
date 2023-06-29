@@ -130,7 +130,19 @@ def merge(weights:list, model_0, model_1, device="cpu", base_alpha=0.5,
                 count_target_of_basealpha = count_target_of_basealpha + 1
                 dprint(f"base_alpha applied: [{key}]", verbose)
 
-            theta_0[key] = (1 - current_alpha) * theta_0[key] + current_alpha * theta_1[key]
+            # p = 0のとき、類似度が高い要素をそのままにして、類似度が低い要素を削除（高類似度抽出）
+            # p = 1のときテンソルaからテンソルbに類似する箇所を類似度に応じて減衰させる関数（低類似度抽出）
+            def f(a: torch.Tensor, b: torch.Tensor, p=1, smoothness=0.3):
+              assert a.shape == b.shape
+              assert 0 <= p <= 1
+              assert 0 <= smoothness <= 1
+              cos = torch.nn.CosineSimilarity(dim=-1)
+              r = torch.nn.ReLU() if smoothness == 0 else torch.nn.Softplus(beta=1 / smoothness)
+              c = r(cos(a, b)).unsqueeze(dim=-1).repeat_interleave(a.shape[-1], -1)
+              m = torch.lerp(c, torch.ones_like(a) - c, p)
+              return a * m
+            theta_0[key] = f(theta_0[key], theta_1[key], current_alpha)
+            # theta_0[key] = (1 - current_alpha) * theta_0[key] + current_alpha * theta_1[key]
 
             if save_as_half:
                 theta_0[key] = theta_0[key].half()
